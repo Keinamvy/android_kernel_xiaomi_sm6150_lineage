@@ -10,23 +10,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Parent Repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: true
-          fetch-depth: 0
+          fetch-depth: 2 # Fetch at least 2 commits to check history for amending
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Hard Reset Submodule
+      - name: Update Submodule
         run: |
-          # Navigate to the submodule directory (adjust path if needed)
           cd KernelSU
-          
-          # Fetch the latest from origin
           git fetch
-          
-          # Force the submodule to match the remote main exactly
           git reset --hard origin/master
-          
           cd ..
 
       - name: Commit and Force Push
@@ -34,18 +28,29 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Add the changed submodule pointer
+          # Stage the submodule change
           git add KernelSU
           
-          # Check if there are actually changes
+          # 1. Check if there are actually changes to the submodule pointer
           if git diff --cached --quiet; then
             echo "No changes detected. Skipping."
             exit 0
           fi
 
-          # Amend the previous 'Update' commit or create a generic one
-          # Using --amend + --force effectively prevents "commit bloat"
-          git commit -m "chore: sync KernelSU to latest origin/main"
+          # 2. Define the standard commit message
+          COMMIT_MSG="chore: sync KernelSU to latest"
+
+          # 3. Logic to prevent bloat:
+          # Check if the last commit was also an automated sync
+          LAST_COMMIT_MSG=$(git log -1 --pretty=%B)
+
+          if [ "$LAST_COMMIT_MSG" = "$COMMIT_MSG" ]; then
+            echo "Last commit was a sync. Amending to prevent bloat..."
+            git commit --amend --no-edit
+          else
+            echo "Last commit was not a sync. Creating new commit..."
+            git commit -m "$COMMIT_MSG"
+          fi
           
-          # Force push to the parent repo's branch
-          git push origin --force
+          # 4. Force push is required because we are rewriting history (amending)
+          git push origin HEAD:${{ github.ref_name }} --force
